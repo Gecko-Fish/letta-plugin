@@ -6,10 +6,7 @@ import Letta from "@letta-ai/letta-client";
 import { ServerResponse } from 'http';
 import { Writable } from "node:stream";
 require('dotenv').config();
-const LETTA_BASE_URL = process.env.LETTA_BASE_URL ?? "https://api.letta.com"; //'http://localhost:8283'
-const LETTA_API_KEY = process.env.LETTA_API_KEY ?? "";
-const client = new Letta({baseURL: LETTA_BASE_URL});
-// const client = new Letta({ apiKey: process.env.LETTA_API_KEY });
+const client = new Letta();
 
 interface PluginInfo {
     id: string;
@@ -57,19 +54,24 @@ export async function init(router: Router): Promise<void> {
 
             const { agent_id, characterId, character_json, agent_settings, model_settings} = req.body;
             const character = JSON.parse(character_json);
-            if(!characterId) throw "Character ID not provided.";
             const link_id = LINK_ID_PREFIX + characterId;
             
-            let agent = undefined;
+            let agent_id_loaded = null;
             let doUpdate = false;
             if(agent_id){
-                console.log('Attempting agent fetch from ID.');
-                agent = await client.agents.retrieve(agent_id);
-                doUpdate = true;
-                console.log('Agent fetched from ID.');
+                try{
+                    console.log('Attempting agent fetch from ID.');
+                    agent_id_loaded = (await client.agents.retrieve(agent_id)).id;
+                    doUpdate = true;
+                    console.log('Agent fetched from ID.');
+                } catch (error){
+                    console.log('Failed to fetch agent from ID.');
+                }
             }
-            else{
-                console.log('Listing existing agents.');
+
+            if(!agent_id_loaded){
+                console.log('Listing existing agents by tag.');
+                if(!characterId) throw "Character ID not provided.";
                 const matching_agents = (await client.agents.list({tags: [link_id]})).items;
                 // create missing
                 if(matching_agents.length==0){
@@ -85,22 +87,23 @@ export async function init(router: Router): Promise<void> {
                         client.blocks.create({label: 'character_personality', value: character.personality, read_only: true}),
                         client.blocks.create({label: 'character_scenario', value: character.scenario, read_only: true}),
                     ]);
-                    await Promise.all([
-                        client.agents.blocks.attach(description_blk.id, {agent_id: agent_create.id}),
-                        client.agents.blocks.attach(personality_blk.id, {agent_id: agent_create.id}),
-                        client.agents.blocks.attach(scenario_blk.id, {agent_id: agent_create.id}),
-                    ]);
 
-                    agent = agent_create;
+                    agent_id_loaded = agent_create.id;
+                    await Promise.all([
+                        client.agents.blocks.attach(description_blk.id, {agent_id: agent_id_loaded}),
+                        client.agents.blocks.attach(personality_blk.id, {agent_id: agent_id_loaded}),
+                        client.agents.blocks.attach(scenario_blk.id, {agent_id: agent_id_loaded}),
+                    ]);
+                    
                     console.log('Agent created.');
                 }else{
-                    agent = matching_agents[0]
+                    agent_id_loaded = matching_agents[0].id
                     doUpdate = true;
                     console.log('Agent found by tag.');
                 }
             }
 
-            if(!agent){
+            if(!agent_id_loaded){
                 throw 'Agent could not be retrieved or created.';
             }
 
@@ -112,21 +115,21 @@ export async function init(router: Router): Promise<void> {
                 } = agent_settings;
 
                 await Promise.all([
-                    client.agents.update(agent.id, {
+                    client.agents.update(agent_id_loaded, {
                         name: character.name,
                         description: character.creatorcomment,
                         tags: [link_id, ...character.tags],
                         model_settings: model_settings,
                         ...rest_settings,
                     }),
-                    client.agents.blocks.update('character_description', {agent_id: agent.id, value: character.description}),
-                    client.agents.blocks.update('character_personality', {agent_id: agent.id, value: character.personality}),
-                    client.agents.blocks.update('character_scenario', {agent_id: agent.id, value: character.scenario}),
+                    client.agents.blocks.update('character_description', {agent_id: agent_id_loaded, value: character.description}),
+                    client.agents.blocks.update('character_personality', {agent_id: agent_id_loaded, value: character.personality}),
+                    client.agents.blocks.update('character_scenario', {agent_id: agent_id_loaded, value: character.scenario}),
                 ]);
                 console.log('Agent updated.');
             }
             
-            return res.status(200).json({agent_id: agent.id});
+            return res.status(200).json({agent_id: agent_id_loaded});
         } catch (error) {
             console.error(chalk.red(MODULE_NAME), 'Request failed', error);
             return res.status(500).send('Internal Server Error');
@@ -238,11 +241,11 @@ export async function init(router: Router): Promise<void> {
             const { agent_id, conversation_id, n_messages } = req.body;
             try{
                 // await client.conversations.delete(conversation_id);
-                fetch(`${LETTA_BASE_URL}/v1/conversations/${load_stash.conversation_id}`, {
+                fetch(`${client.baseURL}/v1/conversations/${load_stash.conversation_id}`, {
                     method: "DELETE",
                     headers: {
                         "Content-Type": "application/json",
-                        ...(LETTA_API_KEY && { Authorization: `Bearer ${LETTA_API_KEY}` }),
+                        ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
                     }
                 });
                 console.log(`Conversation Deleted: ${conversation_id}`);
@@ -270,11 +273,11 @@ export async function init(router: Router): Promise<void> {
 
             const { agent_id } = req.body;
             
-            await fetch(`${LETTA_BASE_URL}/v1/agents/${load_stash.agent_id}`, {
+            await fetch(`${client.baseURL}/v1/agents/${load_stash.agent_id}`, {
                 method: "DELETE",
                 headers: {
                     "Content-Type": "application/json",
-                    ...(LETTA_API_KEY && { Authorization: `Bearer ${LETTA_API_KEY}` }),
+                    ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
                 }
             });
         
@@ -293,11 +296,11 @@ export async function init(router: Router): Promise<void> {
             const { conversation_id } = req.body;
             if(!conversation_id) throw "ID not provided.";
 
-            await fetch(`${LETTA_BASE_URL}/v1/conversations/${load_stash.conversation_id}`, {
+            await fetch(`${client.baseURL}/v1/conversations/${load_stash.conversation_id}`, {
                 method: "DELETE",
                 headers: {
                     "Content-Type": "application/json",
-                    ...(LETTA_API_KEY && { Authorization: `Bearer ${LETTA_API_KEY}` }),
+                    ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
                 }
             });
         
@@ -400,19 +403,19 @@ export async function init(router: Router): Promise<void> {
             if(load_stash.n_messages){ // restrict messages to recent
                 messages = messages
                     .slice(-load_stash.n_messages)
-                    .filter((m: any)=>{m.role !== "system"}); // Remove sys messages when syncing.
+                    .filter((m: any)=> m.role !== "system"); // Remove sys messages when syncing.
             }
             load_stash.n_messages = 1; // Default to sending last message (mostly to prevent locking into edit state)
 
             console.log('Sending:\n', JSON.stringify(messages));
             console.log('\n\nTo:\n', load_stash.conversation_id);
 
-            const response = await fetch(`${LETTA_BASE_URL}/v1/conversations/${load_stash.conversation_id}/messages`, {
+            const response = await fetch(`${client.baseURL}/v1/conversations/${load_stash.conversation_id}/messages`, {
                 method: "POST",    
                 headers: {
                     "Content-Type": "application/json",
                     Accept: "text/event-stream",
-                    ...(LETTA_API_KEY && { Authorization: `Bearer ${LETTA_API_KEY}` }),
+                    ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
                 },
                 body: JSON.stringify({
                     ...req.body,
@@ -455,6 +458,7 @@ export async function init(router: Router): Promise<void> {
                     const chunk = decoder.decode(value, { stream: true });
                     lettaChunkToOpenAI(chunk, buffer, (openai_chunk: Object)=>{
                         const openai_data = encoder.encode(`data: ${JSON.stringify(openai_chunk)}\n\n`);
+                        // console.log('Data:\n', openai_data);
                         res.write(openai_data);
                         if (typeof (res as any).flush === "function") (res as any).flush(); // force flush to prevent buffering the response.
                     });
@@ -488,15 +492,24 @@ export async function init(router: Router): Promise<void> {
         },
     });
     if (!res.ok) throw Object.assign(new Error("OpenRouter error"), { status: res.status });
-    return res.json();
+        return res.json();
     }
 
     app.get("/v1/models", async (req, res) => {
-    try {
-        res.json(OPENROUTER_MODELS);
-    } catch (err: any) {
-        res.status(err.status ?? 502).json({ error: { message: err.message, type: "proxy_error" } });
-    }
+        try {
+            // Connect
+            // console.log('Headers:\n', JSON.stringify(req.headers));
+            const authKey = req.headers['authorization']?.split(' ')[1];
+            client.apiKey = String(authKey);
+            client.baseURL = String(req.headers['letta_base_url'] ?? 'https://api.letta.com');            
+
+            // console.log('Key:', client.apiKey);
+            // console.log('URL:', client.baseURL);
+
+            res.json(OPENROUTER_MODELS);
+        } catch (err: any) {
+            res.status(err.status ?? 502).json({ error: { message: err.message, type: "proxy_error" } });
+        }
     });
 
     app.listen(PORT, () => {
@@ -511,8 +524,8 @@ export async function exit(): Promise<void> {
 }
 
 export const info: PluginInfo = {
-    id: 'letta',
-    name: 'Letta',
+    id: 'letta-plugin',
+    name: 'Letta Plugin',
     description: 'Letta memory management as backend.',
 };
 

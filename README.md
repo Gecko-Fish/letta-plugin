@@ -1,16 +1,14 @@
-# Plugin-WebpackTemplate
+### Overview
+Syncs ST characters and chats with Letta agents and conversations.
 
-Template repository for server plugins using TypeScript and Webpack.
+Pastes ST system prompt into memory blocks/system prompt.
 
-## How to use
+### Setup
+Clone into SillyTavern/plugins.
+Requires the matching extension.
 
-1. Click "Use this template" on the GitHub page.
-2. Create a new repository and clone it to your local machine.
-3. Open the repository in your code editor and run `npm install`.
-4. Edit the `package.json` file.
-5. Write the source code in the `src` directory.
-6. When you're ready to test - run `npm run build`.
-7. A minimized bundle will appear in `dist`, ready to be plugged into SillyTavern.
+Connect to custom OPenAI-compatible Chat Completion endpoint
 
-> [!TIP]
-> If you want to test your plugin live, clone the repo into the `/plugins` folder of your SillyTavern installation.
+- base url: http://localhost:5001/v1
+- api key: your_letta_key
+- Additional Parameters -> Include Request Headers -> LETTA_BASE_URL: http://localhost:8283 (or other location running letta if different from https://api.letta.com)

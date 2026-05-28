@@ -23,7 +23,7 @@ interface Plugin {
 const chalk = new Chalk();
 const MODULE_NAME = '[Letta]';
 const PORT = 5001;
-const LINK_ID_PREFIX = 'ST_LINK_ID:'
+const LINK_ID_PREFIX = 'ST_LINK_ID='
 
 /**
  * Initialize the plugin.
@@ -75,24 +75,32 @@ export async function init(router: Router): Promise<void> {
                 const matching_agents = (await client.agents.list({tags: [link_id]})).items;
                 // create missing
                 if(matching_agents.length==0){
-                    const [agent_create, description_blk, personality_blk, scenario_blk] = await Promise.all([
-                        client.agents.create({
-                            name: character.name,
-                            description: character.creatorcomment,
-                            tags: [link_id, ...character.tags],
-                            model_settings: model_settings,
-                            ...agent_settings,
-                        }),
-                        client.blocks.create({label: 'character_description', value: character.description, read_only: true}),
-                        client.blocks.create({label: 'character_personality', value: character.personality, read_only: true}),
-                        client.blocks.create({label: 'character_scenario', value: character.scenario, read_only: true}),
-                    ]);
+                    // const [agent_create, description_blk, personality_blk, scenario_blk] = await Promise.all([
+                    //     client.agents.create({
+                    //         name: character.name,
+                    //         description: character.creatorcomment,
+                    //         tags: [link_id, ...character.tags],
+                    //         model_settings: model_settings,
+                    //         ...agent_settings,
+                    //     }),
+                    //     client.blocks.create({label: 'character_description', value: character.description, read_only: true}),
+                    //     client.blocks.create({label: 'character_personality', value: character.personality, read_only: true}),
+                    //     client.blocks.create({label: 'character_scenario', value: character.scenario, read_only: true}),
+                    // ]);
+
+                    const agent_create = await client.agents.create({
+                        name: character.name,
+                        description: character.creatorcomment,
+                        tags: [link_id, ...character.tags],
+                        model_settings: model_settings,
+                        ...agent_settings,
+                    });
 
                     agent_id_loaded = agent_create.id;
                     await Promise.all([
-                        client.agents.blocks.attach(description_blk.id, {agent_id: agent_id_loaded}),
-                        client.agents.blocks.attach(personality_blk.id, {agent_id: agent_id_loaded}),
-                        client.agents.blocks.attach(scenario_blk.id, {agent_id: agent_id_loaded}),
+                        // client.agents.blocks.attach(description_blk.id, {agent_id: agent_id_loaded}),
+                        // client.agents.blocks.attach(personality_blk.id, {agent_id: agent_id_loaded}),
+                        // client.agents.blocks.attach(scenario_blk.id, {agent_id: agent_id_loaded}),
                     ]);
                     
                     console.log('Agent created.');
@@ -122,9 +130,9 @@ export async function init(router: Router): Promise<void> {
                         model_settings: model_settings,
                         ...rest_settings,
                     }),
-                    client.agents.blocks.update('character_description', {agent_id: agent_id_loaded, value: character.description}),
-                    client.agents.blocks.update('character_personality', {agent_id: agent_id_loaded, value: character.personality}),
-                    client.agents.blocks.update('character_scenario', {agent_id: agent_id_loaded, value: character.scenario}),
+                    // client.agents.blocks.update('character_description', {agent_id: agent_id_loaded, value: character.description}),
+                    // client.agents.blocks.update('character_personality', {agent_id: agent_id_loaded, value: character.personality}),
+                    // client.agents.blocks.update('character_scenario', {agent_id: agent_id_loaded, value: character.scenario}),
                 ]);
                 console.log('Agent updated.');
             }
@@ -218,9 +226,10 @@ export async function init(router: Router): Promise<void> {
             console.log('--- Update Letta Prompt ---');
             // console.log(JSON.stringify(req.body, null, 2));
 
-            const { agent_id, prompts, prompt_order } = req.body;
+            const { agent_id, system_prompt } = req.body;
+            if(!agent_id) throw "Id not provided.";
 
-            const system_prompt = buildPrompt(prompts, prompt_order[0].order); // using first order group
+            // const system_prompt = buildPrompt(prompts, prompt_order[0].order); // using first order group
 
             await client.agents.update(agent_id, {
                 system: system_prompt
@@ -399,14 +408,19 @@ export async function init(router: Router): Promise<void> {
             console.log('--- Letta Passthrough ---');
             console.log(JSON.stringify(load_stash, null, 2));
             console.log(JSON.stringify(req.body, null, 2));
+
+            if(!load_stash.conversation_id) throw "Letta conversation ID not provided.";
             
-            let messages = req.body.messages; // use all messages
+            let messages = req.body.messages // use all messages
+                .filter((m: any)=> m.role !== "system"); // Remove sys messages when syncing.
+
             if(load_stash.n_messages){ // restrict messages to recent
                 messages = messages
                     .slice(-load_stash.n_messages)
-                    .filter((m: any)=> m.role !== "system"); // Remove sys messages when syncing.
             }
             load_stash.n_messages = 1; // Default to sending last message (mostly to prevent locking into edit state)
+
+            messages = messages.reverse(); // Send them in reverse order so last is sent first
 
             console.log('Sending:\n', JSON.stringify(messages));
             console.log('\n\nTo:\n', load_stash.conversation_id);

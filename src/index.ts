@@ -148,6 +148,7 @@ export async function init(router: Router): Promise<void> {
             if(!load_stash.conversation_id) {
                 const conversation = await client.conversations.create({agent_id: load_stash.agent_id, summary: load_stash.title});
                 load_stash.conversation_id = conversation.id;
+                load_stash.n_messages = null; // send all to newly created conversation
             }
 
             return res.status(200).json({conversation_id: load_stash.conversation_id});

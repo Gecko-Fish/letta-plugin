@@ -2,9 +2,9 @@ import bodyParser from 'body-parser';
 import express, { query } from 'express';
 import { Router } from 'express';
 import { Chalk } from 'chalk';
-import Letta from "@letta-ai/letta-client";
+import Letta from '@letta-ai/letta-client';
 import { ServerResponse } from 'http';
-import { Writable } from "node:stream";
+import { Writable } from 'node:stream';
 require('dotenv').config();
 const client = new Letta();
 
@@ -52,92 +52,61 @@ export async function init(router: Router): Promise<void> {
             console.log('--- Update Letta Agent ---');
             console.log(JSON.stringify(req.body, null, 2));
 
-            const { agent_id, characterId, character_json, agent_settings, model_settings} = req.body;
+            const { agent_id, characterId, character_json, agent_settings, model_settings, blocks} = req.body;
             const character = JSON.parse(character_json);
             const link_id = LINK_ID_PREFIX + characterId;
+
+            const {
+                embedding, // Prevent this from being changed
+                managed_group,
+                ...rest_settings
+            } = agent_settings;
             
-            let agent_id_loaded = null;
-            let doUpdate = false;
+            let agent = null;
             if(agent_id){
                 try{
                     console.log('Attempting agent fetch from ID.');
-                    agent_id_loaded = (await client.agents.retrieve(agent_id)).id;
-                    doUpdate = true;
+                    agent = await client.agents.retrieve(agent_id);
                     console.log('Agent fetched from ID.');
                 } catch (error){
                     console.log('Failed to fetch agent from ID.');
                 }
             }
 
-            if(!agent_id_loaded){
+            if(!agent){
                 console.log('Listing existing agents by tag.');
                 if(!characterId) throw "Character ID not provided.";
                 const matching_agents = (await client.agents.list({tags: [link_id]})).items;
                 // create missing
                 if(matching_agents.length==0){
-                    // const [agent_create, description_blk, personality_blk, scenario_blk] = await Promise.all([
-                    //     client.agents.create({
-                    //         name: character.name,
-                    //         description: character.creatorcomment,
-                    //         tags: [link_id, ...character.tags],
-                    //         model_settings: model_settings,
-                    //         ...agent_settings,
-                    //     }),
-                    //     client.blocks.create({label: 'character_description', value: character.description, read_only: true}),
-                    //     client.blocks.create({label: 'character_personality', value: character.personality, read_only: true}),
-                    //     client.blocks.create({label: 'character_scenario', value: character.scenario, read_only: true}),
-                    // ]);
-
-                    const agent_create = await client.agents.create({
-                        name: character.name,
-                        description: character.creatorcomment,
-                        tags: [link_id, ...character.tags],
-                        model_settings: model_settings,
-                        ...agent_settings,
-                    });
-
-                    agent_id_loaded = agent_create.id;
-                    await Promise.all([
-                        // client.agents.blocks.attach(description_blk.id, {agent_id: agent_id_loaded}),
-                        // client.agents.blocks.attach(personality_blk.id, {agent_id: agent_id_loaded}),
-                        // client.agents.blocks.attach(scenario_blk.id, {agent_id: agent_id_loaded}),
-                    ]);
-                    
-                    console.log('Agent created.');
-                }else{
-                    agent_id_loaded = matching_agents[0].id
-                    doUpdate = true;
-                    console.log('Agent found by tag.');
-                }
-            }
-
-            if(!agent_id_loaded){
-                throw 'Agent could not be retrieved or created.';
-            }
-
-            if(doUpdate){
-                // update existing
-                const {
-                    embedding, // Prevent this from being changed
-                    ...rest_settings
-                } = agent_settings;
-
-                await Promise.all([
-                    client.agents.update(agent_id_loaded, {
+                    agent = await client.agents.create({
+                        embedding: embedding,
                         name: character.name,
                         description: character.creatorcomment,
                         tags: [link_id, ...character.tags],
                         model_settings: model_settings,
                         ...rest_settings,
-                    }),
-                    // client.agents.blocks.update('character_description', {agent_id: agent_id_loaded, value: character.description}),
-                    // client.agents.blocks.update('character_personality', {agent_id: agent_id_loaded, value: character.personality}),
-                    // client.agents.blocks.update('character_scenario', {agent_id: agent_id_loaded, value: character.scenario}),
-                ]);
+                    });
+                    
+                    console.log('Agent created.');
+                }else{
+                    agent = matching_agents[0]
+                    console.log('Agent found by tag.');
+                }
+            }else{
+                // update existing
+                await client.agents.update(agent.id, {
+                    name: character.name,
+                    description: character.creatorcomment,
+                    tags: [link_id, ...character.tags],
+                    model_settings: model_settings,
+                    ...rest_settings,
+                });
+
                 console.log('Agent updated.');
             }
-            
-            return res.status(200).json({agent_id: agent_id_loaded});
+
+            return res.status(200).json({agent_id: agent.id});
         } catch (error) {
             console.error(chalk.red(MODULE_NAME), 'Request failed', error);
             return res.status(500).send('Internal Server Error');

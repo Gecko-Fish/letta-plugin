@@ -128,6 +128,7 @@ export async function init(router: Router): Promise<void> {
                 load_stash.n_messages = null; // send all to newly created conversation
             }
 
+            console.log('Loaded conversation: ' + load_stash.conversation_id);
             return res.status(200).json({conversation_id: load_stash.conversation_id});
         } catch (error) {
             console.error(chalk.red(MODULE_NAME), 'Request failed', error);
@@ -218,18 +219,22 @@ export async function init(router: Router): Promise<void> {
             // console.log(JSON.stringify(req.body, null, 2));
 
             const { agent_id, conversation_id, n_messages } = req.body;
-            try{
-                // await client.conversations.delete(conversation_id);
-                fetch(`${client.baseURL}/v1/conversations/${load_stash.conversation_id}`, {
-                    method: "DELETE",
-                    headers: {
-                        "Content-Type": "application/json",
-                        ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
-                    }
-                });
-                console.log(`Conversation Deleted: ${conversation_id}`);
-            }catch (error) {
-                console.log(`Failed to Delete Conversation: ${conversation_id}\n ${error}`);
+            var conversation_id_mod = conversation_id || load_stash.conversation_id;
+            if(conversation_id_mod){
+                try{
+                    fetch(`${client.baseURL}/v1/conversations/${conversation_id_mod}`, {
+                        method: "DELETE",
+                        headers: {
+                            "Content-Type": "application/json",
+                            ...(client.apiKey && { Authorization: `Bearer ${client.apiKey}` }),
+                        }
+                    });
+                    console.log(`Conversation Deleted: ${conversation_id_mod}`);
+                }catch (error) {
+                    console.log(`Failed to Delete Conversation: ${conversation_id_mod}\n ${error}`);
+                }
+            }else{
+                console.log(`No loaded conversation. Deletion skipped.`);
             }
 
             const conversation = await client.conversations.create({agent_id: agent_id, summary: load_stash.title});
@@ -384,12 +389,21 @@ export async function init(router: Router): Promise<void> {
                 .filter((m: any)=> m.role !== "system"); // Remove sys messages when syncing.
 
             if(load_stash.n_messages){ // restrict messages to recent
-                messages = messages
-                    .slice(-load_stash.n_messages)
-            }
-            load_stash.n_messages = 1; // Default to sending last message (mostly to prevent locking into edit state)
+                messages = messages.slice(-load_stash.n_messages);
 
-            messages = messages.reverse(); // Send them in reverse order so last is sent first
+                const packedContent = messages
+                    .map((msg: any) => `${msg.name || msg.role}: ${msg.content}`)
+                    .join('\n');
+
+                messages[0] = {
+                    role: 'system',
+                    content: packedContent
+                };
+
+                messages.length = 1;
+            }
+
+            load_stash.n_messages = 1; // Default to sending last message (mostly to prevent locking into edit state)
 
             console.log('Sending:\n', JSON.stringify(messages));
             console.log('\n\nTo:\n', load_stash.conversation_id);
